@@ -1,0 +1,107 @@
+service: traffik-backend-api
+
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-1'}
+  environment:
+    NODE_ENV: ${self:provider.stage}
+    MONGODB_URI: ${env:MONGODB_URI}
+    JWT_SECRET: ${env:JWT_SECRET}
+    CLOUDINARY_CLOUD_NAME: ${env:CLOUDINARY_CLOUD_NAME, ''}
+    CLOUDINARY_API_KEY: ${env:CLOUDINARY_API_KEY, ''}
+    CLOUDINARY_API_SECRET: ${env:CLOUDINARY_API_SECRET, ''}
+    SMTP_HOST: ${env:SMTP_HOST, 'smtp.zoho.com'}
+    SMTP_PORT: ${env:SMTP_PORT, '587'}
+    SMTP_ENCRYPTION: ${env:SMTP_ENCRYPTION, 'tls'}
+    SMTP_USER: ${env:SMTP_USER, ''}
+    SMTP_PASSWORD: ${env:SMTP_PASSWORD, ''}
+    SMTP_FROM_EMAIL: ${env:SMTP_FROM_EMAIL, ''}
+    SMTP_FROM_NAME: ${env:SMTP_FROM_NAME, 'Traffik'}
+    APP_WEB_URL: ${env:APP_WEB_URL, ''}
+    KASHIA_API_KEY: ${env:KASHIA_API_KEY, ''}
+    KASHIA_WEBHOOK_SECRET: ${env:KASHIA_WEBHOOK_SECRET, ''}
+    KASHIA_BASE_URL: ${env:KASHIA_BASE_URL, 'https://vault-api.kashiahq.com'}
+  deploymentBucket:
+    name: traffik-deployments
+    serverSideEncryption: AES256
+
+  apiGateway:
+    binaryMediaTypes:
+      - "multipart/form-data"
+      - "application/octet-stream"
+      - "image/jpeg"
+      - "image/png"
+      - "*/*"
+
+functions:
+  api:
+    handler: dist/lambda.handler
+    events:
+      - http:
+          path: /
+          method: any
+          cors: true
+      - http:
+          path: /{proxy+}
+          method: any
+          cors: true
+
+    timeout: 30
+    memorySize: 1024
+
+  # Puts stock held by abandoned checkouts back on sale (see
+  # AbandonedCheckoutsSweeperService). A sweep stops after 90s; the timeout
+  # leaves room to finish cleanly.
+  sweepAbandonedCheckouts:
+    handler: dist/lambda.sweepAbandonedCheckouts
+    timeout: 120
+    memorySize: 512
+    events:
+      - schedule: rate(5 minutes)
+
+  # Replays Kashia webhook deliveries that failed or were left half-done (see
+  # KashiaWebhookReplayService). A run stops after 90s.
+  replayKashiaWebhooks:
+    handler: dist/lambda.replayKashiaWebhooks
+    timeout: 120
+    memorySize: 512
+    events:
+      - schedule: rate(5 minutes)
+
+plugins:
+  - serverless-offline
+
+package:
+  individually: true
+  excludeDevDependencies: true
+  patterns:
+    - "dist/**"
+    - "node_modules/**"
+    - "!node_modules/.cache/**"
+    - "!test/**"
+    - "!*.env"
+    - "!*.md"
+    - "!jest.config.js"
+    - "!tsconfig.json"
+    - "!*.log"
+    - "!src/**"
+    - "!scripts/**"
+  include:
+    - dist/**
+    - node_modules/**
+
+resources:
+  Resources:
+    ApiGatewayRestApi:
+      Type: AWS::ApiGateway::RestApi
+      Properties:
+        Name: traffik-api-${self:provider.stage}
+        Tags:
+          - Key: Environment
+            Value: ${self:provider.stage}
+          - Key: Project
+            Value: traffik
